@@ -171,3 +171,4 @@ import:
   version: v1.2.0
 - package: github.com/unrolled/secure
   version: 824e85271811af89640ea25620c67f6c2eed987e
+- package: github.com/armon/go-proxyproto

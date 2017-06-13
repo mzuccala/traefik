@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/armon/go-proxyproto"
 	"github.com/codegangsta/negroni"
 	"github.com/containous/mux"
 	"github.com/containous/traefik/cluster"
@@ -216,7 +218,8 @@ func (server *Server) startHTTPServers() {
 		}
 		serverEntryPoint := server.serverEntryPoints[newServerEntryPointName]
 		serverEntryPoint.httpServer = newsrv
-		go server.startServer(serverEntryPoint.httpServer, server.globalConfiguration)
+		proxyProtocol := server.globalConfiguration.EntryPoints[newServerEntryPointName].ProxyProtocol
+		go server.startServer(serverEntryPoint.httpServer, server.globalConfiguration, proxyProtocol)
 	}
 }
 
@@ -531,13 +534,18 @@ func (server *Server) createTLSConfig(entryPointName string, tlsOption *TLS, rou
 	return config, nil
 }
 
-func (server *Server) startServer(srv *http.Server, globalConfiguration GlobalConfiguration) {
-	log.Infof("Starting server on %s", srv.Addr)
+func (server *Server) startServer(srv *http.Server, globalConfiguration GlobalConfiguration, proxyProtocol bool) {
 	var err error
-	if srv.TLSConfig != nil {
-		err = srv.ListenAndServeTLS("", "")
+	var proxyProtocol bool = true
+	log.Infof("Starting server on %s", srv.Addr)
+	if proxyProtocol {
+		err = listenAndServeWithProxyProtocol(srv)
 	} else {
-		err = srv.ListenAndServe()
+		if srv.TLSConfig != nil {
+			err = srv.ListenAndServeTLS("", "")
+		else {
+			err = srv.ListenAndServe()
+		}
 	}
 	if err != nil {
 		log.Error("Error creating server: ", err)
@@ -952,7 +960,36 @@ func (server *Server) buildDefaultHTTPRouter() *mux.Router {
 	return router
 }
 
-func parseHealthCheckOptions(lb healthcheck.LoadBalancer, backend string, hc *types.HealthCheck, hcConfig *HealthCheckConfig) *healthcheck.Options {
+func listenAndServeWithProxyProtocol(srv *httpServer) error {
+	var err error
+	addr := srv.Addr
+
+	if srv.TLSConfig != nil {
+		if addr == "" {
+			addr = ":http"
+		}
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		proxyListener := &proxyproto.Listener{Listener: listener}
+		err = srv.Serve(tcpKeepAliveListener{listener.(*net.TCPListener)}, "", "")
+	} else {
+		if addr == "" {
+			addr = ":https"
+		}
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		proxyListener := &proxyproto.Listener{Listener: listener}
+		err = srv.Serve(tcpKeepAliveListener{listener.(*net.TCPListener)})
+	}
+
+	return err
+}
+
+func parseHealthCheckOptions(lb healthcheck.LoadBalancer, backend string, hc *types.HealthCheck, hcConfig HealthCheckConfig) *healthcheck.Options {
 	if hc == nil || hc.Path == "" || hcConfig == nil {
 		return nil
 	}

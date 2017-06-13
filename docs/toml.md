@@ -267,6 +267,12 @@ To write JSON format logs, specify `json` as the format:
 #   address = ":80"
 #   compress = true
 
+# To enable parsing of ProxyProtocol:
+# [entryPoints]
+#   [entryPoints.http]
+#   address = ":80"
+#   proxyprotocol = true
+
 [entryPoints]
   [entryPoints.http]
   address = ":80"
